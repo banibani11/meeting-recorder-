@@ -96,17 +96,6 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 .api-save-btn{background:var(--primary);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
 .api-status{font-size:12px;display:none;align-items:center;gap:5px;color:var(--green)}.api-status.visible{display:flex}.api-status.error{color:var(--red)}
 .api-help{font-size:11px;color:var(--text-muted);line-height:1.5;margin-top:8px}.api-help a{color:var(--accent);text-decoration:none}
-/* Sensitivity slider */
-.sens-section{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:20px 24px;margin-bottom:20px}
-@media(max-width:639px){.sens-section{border-radius:16px;padding:16px;margin-bottom:14px}}
-.sens-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.sens-title{font-size:14px;font-weight:600}
-.sens-value{font-size:13px;color:var(--accent);font-family:'JetBrains Mono',monospace}
-.sens-row{display:flex;align-items:center;gap:12px}
-.sens-label{font-size:11px;color:var(--text-muted);white-space:nowrap}
-.sens-slider{-webkit-appearance:none;appearance:none;flex:1;height:6px;border-radius:3px;background:var(--border);outline:none}
-.sens-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;background:var(--primary);cursor:pointer;border:2px solid var(--accent)}
-.sens-hint{font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.4}
 .summary-card{background:var(--surface);border:1px solid var(--border-active);border-radius:20px;overflow:hidden;margin-bottom:20px;display:none}.summary-card.visible{display:block}
 @media(max-width:639px){.summary-card{border-radius:16px;margin-bottom:14px}}
 .summary-header{padding:16px 24px;border-bottom:1px solid var(--border);background:var(--primary-glow);font-size:15px;font-weight:600}
@@ -132,18 +121,6 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   <div class="api-section"><div class="api-section-header" onclick="toggleApi()"><span class="api-section-title">🔑 <span id="apiHeaderText">AI 요약 설정</span></span><span class="api-section-toggle" id="apiToggle">▼ 열기</span></div>
     <div class="api-section-body" id="apiBody"><div class="api-input-row"><input type="password" class="api-input" id="apiKeyInput" placeholder="Gemini API 키 입력..."><button class="api-save-btn" onclick="saveApiKey()">저장</button></div><div class="api-status" id="apiStatus"><span id="apiStatusText"></span></div>
       <div class="api-help"><a href="https://aistudio.google.com/apikey" target="_blank">→ Google AI Studio에서 무료 API 키 발급</a><br>키는 브라우저 메모리에만 저장. 브라우저 닫으면 삭제.</div></div></div>
-
-  <!-- ★ 마이크 감도 조절 -->
-  <div class="sens-section">
-    <div class="sens-header"><span class="sens-title">🎚️ 마이크 감도</span><span class="sens-value" id="sensValue">x1.0</span></div>
-    <div class="sens-row">
-      <span class="sens-label">낮음</span>
-      <input type="range" class="sens-slider" id="sensSlider" min="1" max="5" step="0.5" value="1" oninput="updateSens()">
-      <span class="sens-label">높음</span>
-    </div>
-    <div class="sens-hint">목소리가 작거나 마이크가 멀 때 감도를 높이세요. 너무 높으면 잡음이 섞일 수 있어요.</div>
-  </div>
-
   <div class="card" id="statusCard">
     <div class="status-row"><div class="status-indicator"><div class="rec-dot" id="recDot"><div class="rec-dot-inner"></div><div class="rec-dot-ring"></div></div><span class="status-label" id="statusLabel">대기 중</span></div><span class="timer" id="timer">00:00</span></div>
     <div class="waveform" id="waveform"></div>
@@ -165,13 +142,9 @@ var status="idle",lang="ko-KR",transcripts=[],elapsed=0;
 var rec=null,timerInterval=null;
 var lastFinalText="",lastFinalTime=0,lastActivity=0,wdInterval=null;
 var geminiApiKey="";
+var isAndroid=/Android/i.test(navigator.userAgent);
 var isMob=/Android|iPhone|iPad/i.test(navigator.userAgent);
-var micGain=1.0; // ★ 마이크 감도 배율
-
-// 화자분석
-var aCtx=null,aAnalyser=null,aMic=null,gainNode=null;
-var pitchBuf=[],volBuf=[];
-var speakers=[],curSp=0,lastSp=-1;
+var curSp=0,lastSp=-1,spCount=1;
 
 var SC=[
   {bg:"rgba(99,102,241,0.15)",border:"rgba(99,102,241,0.4)",text:"#a5b4fc",name:"화자 A"},
@@ -192,70 +165,20 @@ function toast(m){var t=document.getElementById("toast");t.textContent=m;t.class
 function toggleApi(){var b=document.getElementById("apiBody"),t=document.getElementById("apiToggle");b.classList.toggle("open");t.textContent=b.classList.contains("open")?"▲ 닫기":"▼ 열기";}
 function saveApiKey(){var k=document.getElementById("apiKeyInput").value.trim();if(!k)return;geminiApiKey=k;document.getElementById("apiKeyInput").value="";document.getElementById("apiStatus").classList.remove("error");document.getElementById("apiStatus").classList.add("visible");document.getElementById("apiStatusText").textContent="✓ 키 저장됨";document.getElementById("apiHeaderText").textContent="AI 요약 설정 ✓ 준비됨";toast("🔑 API 키 저장 완료");}
 
-// ★ 감도 조절
-function updateSens(){
-  micGain=parseFloat(document.getElementById("sensSlider").value);
-  document.getElementById("sensValue").textContent="x"+micGain.toFixed(1);
-  if(gainNode)gainNode.gain.value=micGain;
-}
-
-// ★ 화자 분석 + 마이크 증폭
-function startVoiceAnalysis(){
-  navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}}).then(function(stream){
-    aMic=stream;
-    aCtx=new(window.AudioContext||window.webkitAudioContext)();
-    var src=aCtx.createMediaStreamSource(stream);
-    // ★ GainNode로 마이크 소리 증폭
-    gainNode=aCtx.createGain();
-    gainNode.gain.value=micGain;
-    aAnalyser=aCtx.createAnalyser();
-    aAnalyser.fftSize=2048;
-    aAnalyser.smoothingTimeConstant=0.85;
-    src.connect(gainNode);
-    gainNode.connect(aAnalyser);
-    // ★ 증폭된 소리를 스피커로 출력하지 않음 (분석용으로만 사용)
-    voiceLoop();
-  }).catch(function(){});
-}
-function voiceLoop(){
-  if(status!=="recording"||!aAnalyser)return;
-  var buf=aAnalyser.frequencyBinCount,d=new Uint8Array(buf);
-  aAnalyser.getByteFrequencyData(d);
-  var sum=0;for(var i=0;i<buf;i++)sum+=d[i]*d[i];
-  var vol=Math.sqrt(sum/buf);
-  // ★ 감도 적용된 임계값 (감도가 높을수록 작은 소리도 감지)
-  var threshold=10/micGain;
-  if(vol>threshold){
-    var mn=Math.floor(80*aAnalyser.fftSize/aCtx.sampleRate);
-    var mx=Math.floor(500*aAnalyser.fftSize/aCtx.sampleRate);
-    var mv=0,mi=0;
-    for(var j=mn;j<mx&&j<buf;j++){if(d[j]>mv){mv=d[j];mi=j;}}
-    var pitch=mi*aCtx.sampleRate/aAnalyser.fftSize;
-    pitchBuf.push(pitch);volBuf.push(vol);
-    if(pitchBuf.length>20)pitchBuf.shift();
-    if(volBuf.length>20)volBuf.shift();
+// ★ 화자 추정: 3초 이상 침묵 후 말하면 화자 변경 가능성
+function guessSpeaker(){
+  if(transcripts.length===0)return 0;
+  var gap=Date.now()-lastFinalTime;
+  if(gap>3000){
+    // 침묵이 길면 화자 변경 가능성
+    var next=(curSp+1)%Math.min(spCount+1,6);
+    if(next>=spCount&&spCount<6)spCount=next+1;
+    curSp=next;
+    document.getElementById("speakerBadge").classList.remove("hidden");
+    document.getElementById("speakerCountText").textContent=spCount+"명 감지됨";
   }
-  requestAnimationFrame(voiceLoop);
-}
-function detectSpeaker(){
-  if(pitchBuf.length<3)return curSp;
-  var aP=pitchBuf.reduce(function(a,b){return a+b;},0)/pitchBuf.length;
-  var aV=volBuf.reduce(function(a,b){return a+b;},0)/volBuf.length;
-  var bestI=-1,bestD=99999;
-  for(var i=0;i<speakers.length;i++){
-    var d=Math.abs(aP-speakers[i].p)+Math.abs(aV-speakers[i].v)*0.2;
-    if(d<bestD){bestD=d;bestI=i;}
-  }
-  if(bestI>=0&&bestD<40){
-    var sp=speakers[bestI];sp.p=(sp.p*sp.c+aP)/(sp.c+1);sp.v=(sp.v*sp.c+aV)/(sp.c+1);sp.c++;curSp=bestI;
-  }else if(speakers.length<6){
-    speakers.push({p:aP,v:aV,c:1});curSp=speakers.length-1;
-  }
-  pitchBuf=[];volBuf=[];
-  if(speakers.length>0){document.getElementById("speakerBadge").classList.remove("hidden");document.getElementById("speakerCountText").textContent=speakers.length+"명 감지됨";}
   return curSp;
 }
-function stopVoice(){if(aMic){aMic.getTracks().forEach(function(t){t.stop();});aMic=null;}if(aCtx){aCtx.close().catch(function(){});aCtx=null;}aAnalyser=null;gainNode=null;}
 
 function isDup(t){var tr=t.trim().toLowerCase();if(!tr)return true;return tr===lastFinalText.trim().toLowerCase()&&Date.now()-lastFinalTime<2000;}
 function toggleLang(){if(status==="recording")return;document.getElementById("langMenu").classList.toggle("open");document.getElementById("backdrop").classList.toggle("open");}
@@ -293,13 +216,14 @@ function addLine(time,text,isI,spk){
   body.appendChild(div);body.scrollTop=body.scrollHeight;document.getElementById("transcriptEmpty").style.display="none";
 }
 
-// ★★★ 음성 인식 — 즉시 재시작 + no-speech 빠른 복귀 ★★★
+// ★★★ 음성 인식 — AudioContext 완전 제거, 순수 SpeechRecognition만 ★★★
 function startRec(){
   if(!SRApi||status!=="recording")return;
   if(rec){try{rec.abort();}catch(x){}rec=null;}
   rec=new SRApi();
   rec.lang=lang;
-  rec.continuous=false;
+  // ★ 안드로이드: false, PC: true (테스트 결과 기반)
+  rec.continuous=!isAndroid;
   rec.interimResults=true;
   rec.maxAlternatives=1;
   rec.onstart=function(){lastActivity=Date.now();};
@@ -311,7 +235,7 @@ function startRec(){
       if(e.results[i].isFinal){
         var tr=t.trim();if(isDup(tr))continue;
         var ts=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-        var spk=detectSpeaker();
+        var spk=guessSpeaker();
         lastFinalText=tr;lastFinalTime=Date.now();
         transcripts.push({text:tr,time:ts,speaker:spk});
         var bd=document.getElementById("transcriptBody"),o=bd.querySelector(".interim");if(o)o.remove();
@@ -322,33 +246,46 @@ function startRec(){
   };
   rec.onerror=function(e){
     if(e.error==="not-allowed"){document.getElementById("errorBanner").textContent="⚠️ 마이크 권한 차단됨. 주소창 왼쪽 아이콘 → 마이크 허용 → 새로고침";document.getElementById("errorBanner").classList.add("visible");handleStop();return;}
-    // ★ no-speech도 즉시 재시작 (끊김 방지 핵심)
-    if(e.error==="no-speech"||e.error==="aborted"){
-      rec=null;
-      if(status==="recording")startRec();
-      return;
-    }
+    // ★ 모든 에러에서 즉시 재시작
+    rec=null;
+    if(status==="recording")startRec();
   };
-  rec.onend=function(){rec=null;if(status==="recording")startRec();};
+  rec.onend=function(){
+    rec=null;
+    if(status==="recording")startRec();
+  };
   try{rec.start();}catch(x){rec=null;if(status==="recording")setTimeout(startRec,50);}
 }
 
-function startWD(){stopWD();wdInterval=setInterval(function(){if(status!=="recording")return;if(Date.now()-lastActivity>8000){lastActivity=Date.now();if(rec){try{rec.abort();}catch(x){}}rec=null;startRec();}},3000);}
+// ★ Watchdog: PC용 — continuous=true에서 멈출 때 대비 (6초)
+function startWD(){
+  stopWD();
+  wdInterval=setInterval(function(){
+    if(status!=="recording")return;
+    if(Date.now()-lastActivity>6000){
+      lastActivity=Date.now();
+      if(rec){try{rec.abort();}catch(x){}}rec=null;
+      startRec();
+    }
+  },2000);
+}
 function stopWD(){if(wdInterval){clearInterval(wdInterval);wdInterval=null;}}
 document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"&&status==="recording"){lastActivity=Date.now();if(rec){try{rec.abort();}catch(x){}}rec=null;setTimeout(function(){if(status==="recording")startRec();},100);}});
 
 function handleStart(){
-  transcripts=[];elapsed=0;lastFinalText="";lastFinalTime=0;speakers=[];curSp=0;lastSp=-1;pitchBuf=[];volBuf=[];lastActivity=Date.now();
+  transcripts=[];elapsed=0;lastFinalText="";lastFinalTime=0;curSp=0;lastSp=-1;spCount=1;lastActivity=Date.now();
   document.getElementById("transcriptBody").innerHTML='<div class="transcript-empty" id="transcriptEmpty">음성을 감지하는 중...</div>';
   document.getElementById("summaryCard").classList.remove("visible");document.getElementById("summaryBody").innerHTML="";
   document.getElementById("speakerBadge").classList.add("hidden");document.getElementById("errorBanner").classList.remove("visible");
   status="recording";updateUI();
   timerInterval=setInterval(function(){elapsed++;document.getElementById("timer").textContent=fmt(elapsed);},1000);
-  startRec();startWD();setTimeout(startVoiceAnalysis,1000);
+  // ★ 음성인식만 시작 — AudioContext 없음
+  startRec();
+  startWD();
 }
 function handlePause(){if(rec){try{rec.abort();}catch(x){}}rec=null;clearInterval(timerInterval);stopWD();status="paused";updateUI();}
 function handleResume(){status="recording";updateUI();lastActivity=Date.now();timerInterval=setInterval(function(){elapsed++;document.getElementById("timer").textContent=fmt(elapsed);},1000);startRec();startWD();}
-function handleStop(){if(rec){try{rec.abort();}catch(x){}}rec=null;clearInterval(timerInterval);stopWD();stopVoice();var o=document.getElementById("transcriptBody").querySelector(".interim");if(o)o.remove();status="done";updateUI();}
+function handleStop(){if(rec){try{rec.abort();}catch(x){}}rec=null;clearInterval(timerInterval);stopWD();var o=document.getElementById("transcriptBody").querySelector(".interim");if(o)o.remove();status="done";updateUI();}
 
 async function handleSummarize(){
   if(!transcripts.length)return;if(!geminiApiKey){document.getElementById("apiStatus").classList.add("visible","error");document.getElementById("apiStatusText").textContent="⚠️ API 키를 먼저 입력해주세요";if(!document.getElementById("apiBody").classList.contains("open"))toggleApi();return;}
