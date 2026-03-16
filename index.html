@@ -146,7 +146,6 @@
   }
   @media (max-width: 639px) { .timer { font-size: 26px; } }
 
-  /* Speaker count badge */
   .speaker-badge {
     display: inline-flex; align-items: center; gap: 5px;
     background: var(--primary-glow); border: 1px solid rgba(99,102,241,0.25);
@@ -154,6 +153,15 @@
     margin-top: 10px;
   }
   .speaker-badge.hidden { display: none; }
+
+  /* Debug status */
+  .debug-status {
+    font-size: 11px; color: var(--text-muted); margin-top: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 6px 10px; background: rgba(255,255,255,0.03);
+    border-radius: 8px; display: none;
+  }
+  .debug-status.visible { display: block; }
 
   .waveform { display: flex; align-items: center; gap: 3px; height: 36px; justify-content: center; }
   @media (max-width: 639px) { .waveform { gap: 2px; height: 28px; } }
@@ -256,7 +264,6 @@
   .interim { opacity: 0.5; }
   .interim .transcript-text { color: var(--text-dim); font-style: italic; }
 
-  /* Speaker divider */
   .speaker-divider {
     display: flex; align-items: center; gap: 10px; margin: 8px 0;
     font-size: 11px; color: var(--text-muted);
@@ -350,9 +357,7 @@
   </div>
   <div class="backdrop" id="backdrop" onclick="closeLang()"></div>
 
-  <div class="error-banner" id="errorBanner">
-    ⚠️ 이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 브라우저를 사용해 주세요.
-  </div>
+  <div class="error-banner" id="errorBanner"></div>
 
   <div class="card" id="statusCard">
     <div class="status-row">
@@ -372,6 +377,9 @@
       <span>👥</span>
       <span id="speakerCountText">화자 감지 중...</span>
     </div>
+
+    <!-- Debug status -->
+    <div class="debug-status" id="debugStatus"></div>
 
     <div id="idleControls">
       <div class="rec-btn-wrap">
@@ -426,21 +434,18 @@
   let elapsed = 0;
   let recognition = null;
   let timerInterval = null;
-
-  // Duplicate filter
   let lastFinalText = "";
   let lastFinalTime = 0;
 
-  // ★ Speaker detection via AudioContext (pitch + volume analysis)
+  // Speaker detection
   let audioContext = null;
   let analyser = null;
   let micStream = null;
   let currentPitch = 0;
   let currentVolume = 0;
-  let pitchHistory = [];  // rolling average
+  let pitchHistory = [];
   let volumeHistory = [];
 
-  // Speaker tracking
   const SPEAKER_COLORS = [
     { bg: "rgba(99,102,241,0.15)", border: "rgba(99,102,241,0.4)", text: "#a5b4fc", name: "화자 A" },
     { bg: "rgba(34,197,94,0.15)", border: "rgba(34,197,94,0.4)", text: "#86efac", name: "화자 B" },
@@ -450,25 +455,33 @@
     { bg: "rgba(163,130,255,0.15)", border: "rgba(163,130,255,0.4)", text: "#c4b5fd", name: "화자 F" },
   ];
 
-  let speakerProfiles = []; // { avgPitch, avgVolume, count }
+  let speakerProfiles = [];
   let currentSpeaker = 0;
   let lastSpeaker = -1;
   let silenceStart = 0;
-  const SILENCE_THRESHOLD = 800; // ms of silence = possible speaker change
-  const PITCH_DIFF_THRESHOLD = 35; // Hz difference to consider different speaker
+  const SILENCE_THRESHOLD = 800;
+  const PITCH_DIFF_THRESHOLD = 35;
 
-  const langLabels = {
-    "ko-KR": "🇰🇷 한국어",
-    "en-US": "🇺🇸 English",
-    "ja-JP": "🇯🇵 日本語",
-    "zh-CN": "🇨🇳 中文",
-  };
+  const langLabels = { "ko-KR": "🇰🇷 한국어", "en-US": "🇺🇸 English", "ja-JP": "🇯🇵 日本語", "zh-CN": "🇨🇳 中文" };
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    document.getElementById("errorBanner").classList.add("visible");
+  const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  // ── Debug logger ──
+  function debugLog(msg) {
+    const el = document.getElementById("debugStatus");
+    el.classList.add("visible");
+    el.textContent = "🔧 " + msg;
+    console.log("[MeetingRecorder]", msg);
   }
 
+  // ── Check support on load ──
+  if (!SpeechRecognitionAPI) {
+    const banner = document.getElementById("errorBanner");
+    banner.textContent = "⚠️ 이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 브라우저를 사용해 주세요.";
+    banner.classList.add("visible");
+  }
+
+  // ── Waveform init ──
   const waveformEl = document.getElementById("waveform");
   const isMobile = window.innerWidth < 640;
   const barCount = isMobile ? 20 : 28;
@@ -481,70 +494,62 @@
     waveformEl.appendChild(bar);
   }
 
-  // ★ Audio analysis for speaker detection
+  // ── Audio analysis (runs independently, doesn't block speech recognition) ──
   async function startAudioAnalysis() {
     try {
+      debugLog("마이크 접근 요청 중...");
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      debugLog("마이크 접근 성공 ✓");
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const source = audioContext.createMediaStreamSource(micStream);
       analyser = audioContext.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.8;
       source.connect(analyser);
-      requestAnimationFrame(analyzeAudio);
+      analyzeAudioLoop();
     } catch(e) {
-      console.log("Audio analysis unavailable:", e);
+      debugLog("마이크 접근 실패: " + e.message + " (화자 구분 없이 진행)");
+      // ★ 마이크 실패해도 음성인식은 계속 진행
     }
   }
 
-  function analyzeAudio() {
-    if (status !== "recording" || !analyser) return;
+  function analyzeAudioLoop() {
+    if (status !== "recording" && status !== "paused") return;
+    if (!analyser) return;
 
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
     analyser.getByteFrequencyData(dataArray);
 
-    // Volume (RMS of frequency data)
     let sum = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      sum += dataArray[i] * dataArray[i];
-    }
+    for (let i = 0; i < bufferLength; i++) sum += dataArray[i] * dataArray[i];
     currentVolume = Math.sqrt(sum / bufferLength);
 
-    // Pitch estimation (find dominant frequency)
-    let maxVal = 0;
-    let maxIndex = 0;
-    // Focus on voice range (80Hz ~ 500Hz)
     const minBin = Math.floor(80 * analyser.fftSize / audioContext.sampleRate);
     const maxBin = Math.floor(500 * analyser.fftSize / audioContext.sampleRate);
+    let maxVal = 0, maxIndex = 0;
     for (let i = minBin; i < maxBin && i < bufferLength; i++) {
-      if (dataArray[i] > maxVal) {
-        maxVal = dataArray[i];
-        maxIndex = i;
-      }
+      if (dataArray[i] > maxVal) { maxVal = dataArray[i]; maxIndex = i; }
     }
     currentPitch = maxIndex * audioContext.sampleRate / analyser.fftSize;
 
-    // Track silence for speaker change detection
     if (currentVolume < 8) {
       if (silenceStart === 0) silenceStart = Date.now();
     } else {
       silenceStart = 0;
-      // Rolling averages
       pitchHistory.push(currentPitch);
       volumeHistory.push(currentVolume);
       if (pitchHistory.length > 15) pitchHistory.shift();
       if (volumeHistory.length > 15) volumeHistory.shift();
     }
 
-    requestAnimationFrame(analyzeAudio);
+    requestAnimationFrame(analyzeAudioLoop);
   }
 
   function getAvgPitch() {
     if (pitchHistory.length === 0) return 0;
     return pitchHistory.reduce((a, b) => a + b, 0) / pitchHistory.length;
   }
-
   function getAvgVolume() {
     if (volumeHistory.length === 0) return 0;
     return volumeHistory.reduce((a, b) => a + b, 0) / volumeHistory.length;
@@ -556,39 +561,24 @@
     if (avgPitch === 0) return currentSpeaker;
 
     const hadSilence = silenceStart > 0 && (Date.now() - silenceStart) > SILENCE_THRESHOLD;
-
-    // Try to match existing speaker profile
-    let bestMatch = -1;
-    let bestDist = Infinity;
+    let bestMatch = -1, bestDist = Infinity;
 
     for (let i = 0; i < speakerProfiles.length; i++) {
       const sp = speakerProfiles[i];
-      const pitchDiff = Math.abs(avgPitch - sp.avgPitch);
-      const volDiff = Math.abs(avgVol - sp.avgVolume) * 0.3; // volume weighted less
-      const dist = pitchDiff + volDiff;
-
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestMatch = i;
-      }
+      const dist = Math.abs(avgPitch - sp.avgPitch) + Math.abs(avgVol - sp.avgVolume) * 0.3;
+      if (dist < bestDist) { bestDist = dist; bestMatch = i; }
     }
 
-    // If close match exists and no long silence, keep same speaker
     if (bestMatch >= 0 && bestDist < PITCH_DIFF_THRESHOLD && !hadSilence) {
-      // Update profile with running average
       const sp = speakerProfiles[bestMatch];
       sp.avgPitch = (sp.avgPitch * sp.count + avgPitch) / (sp.count + 1);
       sp.avgVolume = (sp.avgVolume * sp.count + avgVol) / (sp.count + 1);
       sp.count++;
       currentSpeaker = bestMatch;
-    }
-    // If silence detected + pitch significantly different → likely new or different speaker
-    else if (hadSilence || bestDist >= PITCH_DIFF_THRESHOLD) {
-      // Check if matches any known speaker (more lenient after silence)
+    } else if (hadSilence || bestDist >= PITCH_DIFF_THRESHOLD) {
       let found = false;
       for (let i = 0; i < speakerProfiles.length; i++) {
-        const pitchDiff = Math.abs(avgPitch - speakerProfiles[i].avgPitch);
-        if (pitchDiff < PITCH_DIFF_THRESHOLD * 1.2) {
+        if (Math.abs(avgPitch - speakerProfiles[i].avgPitch) < PITCH_DIFF_THRESHOLD * 1.2) {
           currentSpeaker = i;
           const sp = speakerProfiles[i];
           sp.avgPitch = (sp.avgPitch * sp.count + avgPitch) / (sp.count + 1);
@@ -599,17 +589,14 @@
         }
       }
       if (!found && speakerProfiles.length < SPEAKER_COLORS.length) {
-        // New speaker
-        speakerProfiles.push({ avgPitch: avgPitch, avgVolume: avgVol, count: 1 });
+        speakerProfiles.push({ avgPitch, avgVolume: avgVol, count: 1 });
         currentSpeaker = speakerProfiles.length - 1;
       }
     }
 
-    // Reset for next segment
     pitchHistory = [];
     volumeHistory = [];
     silenceStart = 0;
-
     updateSpeakerBadge();
     return currentSpeaker;
   }
@@ -624,36 +611,23 @@
   }
 
   function stopAudioAnalysis() {
-    if (micStream) {
-      micStream.getTracks().forEach(t => t.stop());
-      micStream = null;
-    }
-    if (audioContext && audioContext.state !== "closed") {
-      audioContext.close().catch(() => {});
-      audioContext = null;
-    }
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (audioContext && audioContext.state !== "closed") { audioContext.close().catch(() => {}); audioContext = null; }
     analyser = null;
   }
 
-  // ── Duplicate filter ──
   function isDuplicate(text) {
     const now = Date.now();
     const trimmed = text.trim().toLowerCase();
     if (trimmed.length === 0) return true;
-    if (trimmed === lastFinalText.trim().toLowerCase() && (now - lastFinalTime) < 2000) {
-      return true;
-    }
+    if (trimmed === lastFinalText.trim().toLowerCase() && (now - lastFinalTime) < 2000) return true;
     return false;
   }
 
-  // ── Language ──
   function toggleLang() {
     if (status === "recording") return;
-    const menu = document.getElementById("langMenu");
-    const bd = document.getElementById("backdrop");
-    const open = menu.classList.contains("open");
-    menu.classList.toggle("open", !open);
-    bd.classList.toggle("open", !open);
+    document.getElementById("langMenu").classList.toggle("open");
+    document.getElementById("backdrop").classList.toggle("open");
   }
   function closeLang() {
     document.getElementById("langMenu").classList.remove("open");
@@ -671,9 +645,7 @@
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`
-      : `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
+    return h > 0 ? `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}` : `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
   }
 
   function updateUI() {
@@ -696,11 +668,7 @@
       if (status === "recording") {
         bar.classList.add("active");
         bar.style.animation = `waveform ${bar.style.animationDuration} ease-in-out infinite`;
-      } else {
-        bar.classList.remove("active");
-        bar.style.animation = "none";
-        bar.style.height = "3px";
-      }
+      } else { bar.classList.remove("active"); bar.style.animation = "none"; bar.style.height = "3px"; }
     });
 
     document.getElementById("idleControls").style.display = status === "idle" ? "block" : "none";
@@ -708,8 +676,7 @@
     document.getElementById("pausedControls").style.display = status === "paused" ? "grid" : "none";
     document.getElementById("doneControls").style.display = status === "done" ? "grid" : "none";
 
-    const badge = document.getElementById("speakerBadge");
-    if (status === "idle") badge.classList.add("hidden");
+    if (status === "idle") document.getElementById("speakerBadge").classList.add("hidden");
 
     document.getElementById("transcriptCount").textContent = `${transcripts.length}개 문장`;
 
@@ -717,9 +684,7 @@
     if (transcripts.length === 0 && !document.querySelector(".interim")) {
       empty.style.display = "flex";
       empty.textContent = status === "idle" ? "녹음을 시작하면 여기에\n내용이 표시됩니다" : "음성을 감지하는 중...";
-    } else {
-      empty.style.display = "none";
-    }
+    } else { empty.style.display = "none"; }
   }
 
   function addTranscriptLine(time, text, isInterim, speakerIdx) {
@@ -729,7 +694,6 @@
 
     const sc = SPEAKER_COLORS[speakerIdx] || SPEAKER_COLORS[0];
 
-    // Add speaker divider if speaker changed
     if (!isInterim && speakerIdx !== lastSpeaker && lastSpeaker >= 0 && transcripts.length > 0) {
       const divider = document.createElement("div");
       divider.className = "speaker-divider";
@@ -740,9 +704,7 @@
 
     const div = document.createElement("div");
     div.className = isInterim ? "transcript-line interim" : "transcript-line";
-
-    const speakerTag = isInterim ? "" :
-      `<div class="speaker-tag" style="background:${sc.bg};color:${sc.text};border:1px solid ${sc.border}">${sc.name}</div>`;
+    const speakerTag = isInterim ? "" : `<div class="speaker-tag" style="background:${sc.bg};color:${sc.text};border:1px solid ${sc.border}">${sc.name}</div>`;
 
     div.innerHTML = `
       <span class="transcript-time">${isInterim ? "···" : time}</span>
@@ -756,75 +718,99 @@
     document.getElementById("transcriptEmpty").style.display = "none";
   }
 
-  function escapeHtml(t) {
-    const d = document.createElement("div");
-    d.textContent = t;
-    return d.innerHTML;
-  }
+  function escapeHtml(t) { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; }
 
+  // ★ Speech recognition - completely independent from audio analysis
   function startRecognition() {
-    if (!SpeechRecognition) return;
-    recognition = new SpeechRecognition();
-    recognition.lang = lang;
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    recognition.maxAlternatives = 1;
+    if (!SpeechRecognitionAPI) {
+      debugLog("SpeechRecognition API 없음");
+      return;
+    }
 
-    recognition.onresult = (e) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          const trimmed = t.trim();
+    try {
+      recognition = new SpeechRecognitionAPI();
+      recognition.lang = lang;
+      recognition.interimResults = true;
+      recognition.continuous = true;
+      recognition.maxAlternatives = 1;
 
-          if (isDuplicate(trimmed)) {
+      recognition.onstart = () => {
+        debugLog("음성 인식 시작됨 ✓ (말씀해 주세요)");
+      };
+
+      recognition.onaudiostart = () => {
+        debugLog("오디오 감지 시작 ✓");
+      };
+
+      recognition.onspeechstart = () => {
+        debugLog("음성 감지됨 ✓");
+      };
+
+      recognition.onresult = (e) => {
+        let interim = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) {
+            const trimmed = t.trim();
+            if (isDuplicate(trimmed)) {
+              const body = document.getElementById("transcriptBody");
+              const oi = body.querySelector(".interim");
+              if (oi) oi.remove();
+              continue;
+            }
+
+            const ts = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            const speaker = detectSpeaker();
+
+            lastFinalText = trimmed;
+            lastFinalTime = Date.now();
+            transcripts.push({ text: trimmed, time: ts, speaker });
+
             const body = document.getElementById("transcriptBody");
-            const oldInterim = body.querySelector(".interim");
-            if (oldInterim) oldInterim.remove();
-            continue;
+            const oi = body.querySelector(".interim");
+            if (oi) oi.remove();
+            addTranscriptLine(ts, trimmed, false, speaker);
+            updateUI();
+            debugLog(`문장 ${transcripts.length}개 기록됨`);
+          } else {
+            interim += t;
           }
-
-          const ts = new Date().toLocaleTimeString("ko-KR", {
-            hour: "2-digit", minute: "2-digit", second: "2-digit",
-          });
-
-          // ★ Detect which speaker
-          const speaker = detectSpeaker();
-
-          lastFinalText = trimmed;
-          lastFinalTime = Date.now();
-
-          transcripts.push({ text: trimmed, time: ts, speaker: speaker });
-
-          const body = document.getElementById("transcriptBody");
-          const oldInterim = body.querySelector(".interim");
-          if (oldInterim) oldInterim.remove();
-          addTranscriptLine(ts, trimmed, false, speaker);
-          updateUI();
-        } else {
-          interim += t;
         }
-      }
-      if (interim) addTranscriptLine("", interim, true, currentSpeaker);
-    };
+        if (interim) addTranscriptLine("", interim, true, currentSpeaker);
+      };
 
-    recognition.onerror = (e) => {
-      if (e.error === "no-speech" || e.error === "aborted") return;
-      if (status === "recording") {
-        setTimeout(() => { try { startRecognition(); } catch(_) {} }, 300);
-      }
-    };
+      recognition.onerror = (e) => {
+        debugLog("오류: " + e.error);
+        if (e.error === "not-allowed") {
+          const banner = document.getElementById("errorBanner");
+          banner.textContent = "⚠️ 마이크 권한이 차단되어 있습니다. 주소창 왼쪽 🔒 아이콘 → 사이트 설정 → 마이크 → 허용 후 새로고침 해주세요.";
+          banner.classList.add("visible");
+          handleStop();
+          return;
+        }
+        if (e.error === "no-speech" || e.error === "aborted") return;
+        // Auto-restart on other errors
+        if (status === "recording") {
+          setTimeout(() => { try { startRecognition(); } catch(_) {} }, 500);
+        }
+      };
 
-    recognition.onend = () => {
-      if (status === "recording") {
-        setTimeout(() => { try { startRecognition(); } catch(_) {} }, 100);
-      }
-    };
+      recognition.onend = () => {
+        debugLog("음성 인식 세션 종료 → 재시작 중...");
+        if (status === "recording") {
+          setTimeout(() => { try { startRecognition(); } catch(_) {} }, 200);
+        }
+      };
 
-    try { recognition.start(); } catch(e) {}
+      recognition.start();
+      debugLog("음성 인식 요청 중...");
+
+    } catch(e) {
+      debugLog("음성 인식 시작 실패: " + e.message);
+    }
   }
 
-  function handleStart() {
+  async function handleStart() {
     transcripts = [];
     elapsed = 0;
     lastFinalText = "";
@@ -841,24 +827,33 @@
     document.getElementById("summaryCard").classList.remove("visible");
     document.getElementById("summaryBody").innerHTML = "";
     document.getElementById("speakerBadge").classList.add("hidden");
+    document.getElementById("errorBanner").classList.remove("visible");
 
     status = "recording";
     updateUI();
+    debugLog("녹음 시작 준비...");
+
     timerInterval = setInterval(() => {
       elapsed++;
       document.getElementById("timer").textContent = formatTime(elapsed);
     }, 1000);
 
-    // Start both speech recognition and audio analysis
-    startAudioAnalysis();
-    setTimeout(() => startRecognition(), 100);
+    // ★ 핵심 수정: 먼저 음성인식을 시작하고, 오디오 분석은 별도로 시도
+    // 음성인식이 마이크 권한을 받아오기 때문에 이걸 먼저 실행
+    startRecognition();
+
+    // 화자 분석은 별도로 (실패해도 음성인식에 영향 없음)
+    setTimeout(() => {
+      startAudioAnalysis();
+    }, 1000);
   }
 
   function handlePause() {
-    if (recognition) { try { recognition.abort(); } catch(_){} recognition = null; }
+    if (recognition) { try { recognition.abort(); } catch(_) {} recognition = null; }
     clearInterval(timerInterval);
     status = "paused";
     updateUI();
+    debugLog("일시정지됨");
   }
 
   function handleResume() {
@@ -868,18 +863,20 @@
       elapsed++;
       document.getElementById("timer").textContent = formatTime(elapsed);
     }, 1000);
-    if (!analyser) startAudioAnalysis();
-    setTimeout(() => startRecognition(), 100);
+    startRecognition();
+    if (!analyser) setTimeout(() => startAudioAnalysis(), 500);
+    debugLog("재개됨");
   }
 
   function handleStop() {
-    if (recognition) { try { recognition.abort(); } catch(_){} recognition = null; }
+    if (recognition) { try { recognition.abort(); } catch(_) {} recognition = null; }
     clearInterval(timerInterval);
     stopAudioAnalysis();
-    const oldInterim = document.getElementById("transcriptBody").querySelector(".interim");
-    if (oldInterim) oldInterim.remove();
+    const oi = document.getElementById("transcriptBody").querySelector(".interim");
+    if (oi) oi.remove();
     status = "done";
     updateUI();
+    debugLog("녹음 완료 — " + transcripts.length + "개 문장 기록됨");
   }
 
   async function handleSummarize() {
@@ -899,7 +896,6 @@
       <div class="skeleton" style="width:60%;animation-delay:0.45s"></div>
     `;
 
-    // ★ Include speaker info in transcript for better summary
     const fullText = transcripts.map(t => {
       const name = SPEAKER_COLORS[t.speaker]?.name || "화자";
       return `[${t.time}] ${name}: ${t.text}`;
@@ -936,17 +932,11 @@
     const body = document.getElementById("summaryBody");
     let html = "";
     text.split("\n").forEach(line => {
-      if (line.startsWith("## ")) {
-        html += `<h3>${escapeHtml(line.replace("## ", ""))}</h3>`;
-      } else if (line.startsWith("- ")) {
-        html += `<div class="item"><span class="bullet">•</span><span class="item-text">${escapeHtml(line.replace("- ", ""))}</span></div>`;
-      } else if (line.startsWith("---")) {
-        html += `<hr>`;
-      } else if (line.trim() === "") {
-        html += `<div style="height:6px"></div>`;
-      } else {
-        html += `<p>${escapeHtml(line)}</p>`;
-      }
+      if (line.startsWith("## ")) html += `<h3>${escapeHtml(line.replace("## ", ""))}</h3>`;
+      else if (line.startsWith("- ")) html += `<div class="item"><span class="bullet">•</span><span class="item-text">${escapeHtml(line.replace("- ", ""))}</span></div>`;
+      else if (line.startsWith("---")) html += `<hr>`;
+      else if (line.trim() === "") html += `<div style="height:6px"></div>`;
+      else html += `<p>${escapeHtml(line)}</p>`;
     });
     body.innerHTML = html;
   }
@@ -958,9 +948,7 @@
       content += `[${t.time}] ${name}: ${t.text}\n`;
     });
     const summaryText = document.getElementById("summaryBody").textContent;
-    if (summaryText.trim()) {
-      content += `\n${"=".repeat(40)}\n요약\n${"=".repeat(40)}\n${summaryText}`;
-    }
+    if (summaryText.trim()) content += `\n${"=".repeat(40)}\n요약\n${"=".repeat(40)}\n${summaryText}`;
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
