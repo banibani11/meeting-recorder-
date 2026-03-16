@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>마이크 테스트</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#eee;padding:20px;font-size:16px}
+button{font-size:20px;padding:15px 30px;border:none;border-radius:10px;background:#6366f1;color:#fff;cursor:pointer;margin:10px 5px}
+#log{margin-top:20px;padding:15px;background:#1a1a2e;border-radius:10px;white-space:pre-wrap;font-size:14px;max-height:70vh;overflow-y:auto}
+.ok{color:#22c55e} .err{color:#ef4444} .info{color:#818cf8}
+</style>
+</head>
+<body>
+<h2>🎙️ 음성 인식 테스트</h2>
+<p>아래 버튼을 누르고 말해보세요</p>
+<button onclick="test1()">테스트 1: 기본</button>
+<button onclick="test2()">테스트 2: 심플</button>
+<button onclick="stopAll()">⏹ 중지</button>
+<div id="log"></div>
+<script>
+var log=document.getElementById("log");
+var rec=null;
+function L(msg,cls){log.innerHTML+='<span class="'+(cls||"")+'">'+msg+'</span>\n';log.scrollTop=log.scrollHeight;}
+
+// 테스트 1: continuous=false, interimResults=true
+function test1(){
+  stopAll();
+  L("━━━ 테스트1: continuous=false, interim=true ━━━","info");
+  var S=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!S){L("SpeechRecognition 없음","err");return;}
+  rec=new S();
+  rec.lang="ko-KR";
+  rec.continuous=false;
+  rec.interimResults=true;
+  rec.onstart=function(){L("▶ onstart 발생","ok");};
+  rec.onaudiostart=function(){L("▶ onaudiostart","ok");};
+  rec.onspeechstart=function(){L("▶ onspeechstart (말 감지!)","ok");};
+  rec.onspeechend=function(){L("▶ onspeechend (말 끝)","info");};
+  rec.onresult=function(e){
+    for(var i=e.resultIndex;i<e.results.length;i++){
+      var t=e.results[i][0].transcript;
+      var f=e.results[i].isFinal;
+      L((f?"✅ [최종] ":"💬 [중간] ")+t, f?"ok":"info");
+    }
+  };
+  rec.onerror=function(e){L("❌ 오류: "+e.error,"err");};
+  rec.onend=function(){L("⏹ onend (세션 종료)","info");};
+  rec.start();
+  L("시작 요청됨...","info");
+}
+
+// 테스트 2: continuous=false, interimResults=false (가장 심플)
+function test2(){
+  stopAll();
+  L("━━━ 테스트2: continuous=false, interim=false ━━━","info");
+  var S=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!S){L("SpeechRecognition 없음","err");return;}
+  rec=new S();
+  rec.lang="ko-KR";
+  rec.continuous=false;
+  rec.interimResults=false;
+  rec.onstart=function(){L("▶ onstart","ok");};
+  rec.onspeechstart=function(){L("▶ onspeechstart","ok");};
+  rec.onresult=function(e){
+    for(var i=0;i<e.results.length;i++){
+      L("✅ 결과: "+e.results[i][0].transcript,"ok");
+    }
+  };
+  rec.onerror=function(e){L("❌ 오류: "+e.error,"err");};
+  rec.onend=function(){L("⏹ 종료","info");};
+  rec.start();
+  L("시작 요청됨...","info");
+}
+
+function stopAll(){if(rec){try{rec.abort();}catch(e){}rec=null;L("--- 중지됨 ---","info");}}
+</script>
+</body>
+</html>
