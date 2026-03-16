@@ -67,8 +67,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 .btn-copy{background:var(--yellow-glow);color:var(--yellow);border:1px solid rgba(234,179,8,0.3)}
 .transcript-header{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
 @media(max-width:639px){.transcript-header{padding:12px 16px}}
-.transcript-title{font-size:15px;font-weight:600}
-@media(max-width:639px){.transcript-title{font-size:14px}}
+.transcript-title{font-size:15px;font-weight:600}@media(max-width:639px){.transcript-title{font-size:14px}}
 .transcript-count{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
 .transcript-body{height:340px;min-height:280px;overflow-y:auto;padding:16px 24px;-webkit-overflow-scrolling:touch}
 @media(max-width:639px){.transcript-body{height:40dvh;min-height:220px;padding:12px 16px}}
@@ -101,8 +100,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 @media(max-width:639px){.summary-card{border-radius:16px;margin-bottom:14px}}
 .summary-header{padding:16px 24px;border-bottom:1px solid var(--border);background:var(--primary-glow);font-size:15px;font-weight:600}
 @media(max-width:639px){.summary-header{padding:12px 16px;font-size:14px}}
-.summary-body{padding:16px 24px}
-@media(max-width:639px){.summary-body{padding:12px 16px}}
+.summary-body{padding:16px 24px}@media(max-width:639px){.summary-body{padding:12px 16px}}
 .summary-body h3{font-size:16px;font-weight:600;color:var(--accent);margin:14px 0 6px}
 .summary-body .item{display:flex;gap:8px;margin-bottom:4px}.summary-body .bullet{color:var(--primary)}.summary-body .item-text{color:var(--text);line-height:1.6;font-size:14px}
 .summary-body p{color:var(--text);line-height:1.6;margin:2px 0;font-size:14px}.summary-body hr{border:none;border-top:1px solid var(--border);margin:10px 0}
@@ -144,11 +142,14 @@ var status="idle",lang="ko-KR",transcripts=[],elapsed=0;
 var rec=null,timerInterval=null;
 var lastFinalText="",lastFinalTime=0,lastActivity=0,wdInterval=null;
 var geminiApiKey="";
-var isAndroid=/Android/i.test(navigator.userAgent);
 var isMob=/Android|iPhone|iPad/i.test(navigator.userAgent);
 
-// Speaker
-var speakerProfiles=[],curSpeaker=0,lastSpeaker=-1;
+// ★ 화자 분석용 (음성인식과 완전 독립)
+var aCtx=null,aAnalyser=null,aMic=null;
+var pitchBuf=[],volBuf=[];
+var speakers=[]; // {avgP, avgV, count}
+var curSp=0,lastSp=-1;
+
 var SC=[
   {bg:"rgba(99,102,241,0.15)",border:"rgba(99,102,241,0.4)",text:"#a5b4fc",name:"화자 A"},
   {bg:"rgba(34,197,94,0.15)",border:"rgba(34,197,94,0.4)",text:"#86efac",name:"화자 B"},
@@ -161,7 +162,6 @@ var langLabels={"ko-KR":"🇰🇷 한국어","en-US":"🇺🇸 English","ja-JP":
 var SRApi=window.SpeechRecognition||window.webkitSpeechRecognition;
 if(!SRApi){document.getElementById("errorBanner").textContent="⚠️ Chrome 브라우저를 사용해 주세요.";document.getElementById("errorBanner").classList.add("visible");}
 
-// Waveform
 var wfEl=document.getElementById("waveform");
 for(var i=0;i<(isMob?20:28);i++){var b=document.createElement("div");b.className="wave-bar";b.style.animationDelay=i*0.04+"s";b.style.setProperty("--h",6+Math.random()*(isMob?20:28)+"px");b.style.animationDuration=0.35+Math.random()*0.65+"s";wfEl.appendChild(b);}
 
@@ -169,7 +169,72 @@ function toast(m){var t=document.getElementById("toast");t.textContent=m;t.class
 function toggleApi(){var b=document.getElementById("apiBody"),t=document.getElementById("apiToggle");b.classList.toggle("open");t.textContent=b.classList.contains("open")?"▲ 닫기":"▼ 열기";}
 function saveApiKey(){var k=document.getElementById("apiKeyInput").value.trim();if(!k)return;geminiApiKey=k;document.getElementById("apiKeyInput").value="";document.getElementById("apiStatus").classList.remove("error");document.getElementById("apiStatus").classList.add("visible");document.getElementById("apiStatusText").textContent="✓ 키 저장됨";document.getElementById("apiHeaderText").textContent="AI 요약 설정 ✓ 준비됨";toast("🔑 API 키 저장 완료");}
 
-function isDup(t){var tr=t.trim().toLowerCase();if(!tr)return true;if(tr===lastFinalText.trim().toLowerCase()&&Date.now()-lastFinalTime<2000)return true;return false;}
+// ★ 화자 분석 (완전 독립 — 음성인식에 영향 없음)
+function startVoiceAnalysis(){
+  navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+    aMic=stream;
+    aCtx=new(window.AudioContext||window.webkitAudioContext)();
+    var src=aCtx.createMediaStreamSource(stream);
+    aAnalyser=aCtx.createAnalyser();
+    aAnalyser.fftSize=2048;
+    aAnalyser.smoothingTimeConstant=0.85;
+    src.connect(aAnalyser);
+    voiceLoop();
+  }).catch(function(){});
+}
+function voiceLoop(){
+  if(status!=="recording"||!aAnalyser)return;
+  var buf=aAnalyser.frequencyBinCount,d=new Uint8Array(buf);
+  aAnalyser.getByteFrequencyData(d);
+  var sum=0;for(var i=0;i<buf;i++)sum+=d[i]*d[i];
+  var vol=Math.sqrt(sum/buf);
+  if(vol>10){
+    var mn=Math.floor(80*aAnalyser.fftSize/aCtx.sampleRate);
+    var mx=Math.floor(500*aAnalyser.fftSize/aCtx.sampleRate);
+    var mv=0,mi=0;
+    for(var j=mn;j<mx&&j<buf;j++){if(d[j]>mv){mv=d[j];mi=j;}}
+    var pitch=mi*aCtx.sampleRate/aAnalyser.fftSize;
+    pitchBuf.push(pitch);volBuf.push(vol);
+    if(pitchBuf.length>20)pitchBuf.shift();
+    if(volBuf.length>20)volBuf.shift();
+  }
+  requestAnimationFrame(voiceLoop);
+}
+function detectSpeaker(){
+  if(pitchBuf.length<3)return curSp;
+  var aP=pitchBuf.reduce(function(a,b){return a+b;},0)/pitchBuf.length;
+  var aV=volBuf.reduce(function(a,b){return a+b;},0)/volBuf.length;
+  var bestI=-1,bestD=99999;
+  for(var i=0;i<speakers.length;i++){
+    var d=Math.abs(aP-speakers[i].p)+Math.abs(aV-speakers[i].v)*0.2;
+    if(d<bestD){bestD=d;bestI=i;}
+  }
+  if(bestI>=0&&bestD<40){
+    var sp=speakers[bestI];
+    sp.p=(sp.p*sp.c+aP)/(sp.c+1);
+    sp.v=(sp.v*sp.c+aV)/(sp.c+1);
+    sp.c++;
+    curSp=bestI;
+  }else if(speakers.length<6){
+    speakers.push({p:aP,v:aV,c:1});
+    curSp=speakers.length-1;
+  }
+  // 버퍼 리셋
+  pitchBuf=[];volBuf=[];
+  // UI 업데이트
+  if(speakers.length>0){
+    document.getElementById("speakerBadge").classList.remove("hidden");
+    document.getElementById("speakerCountText").textContent=speakers.length+"명 감지됨";
+  }
+  return curSp;
+}
+function stopVoiceAnalysis(){
+  if(aMic){aMic.getTracks().forEach(function(t){t.stop();});aMic=null;}
+  if(aCtx){aCtx.close().catch(function(){});aCtx=null;}
+  aAnalyser=null;
+}
+
+function isDup(t){var tr=t.trim().toLowerCase();if(!tr)return true;return tr===lastFinalText.trim().toLowerCase()&&Date.now()-lastFinalTime<2000;}
 function toggleLang(){if(status==="recording")return;document.getElementById("langMenu").classList.toggle("open");document.getElementById("backdrop").classList.toggle("open");}
 function closeLang(){document.getElementById("langMenu").classList.remove("open");document.getElementById("backdrop").classList.remove("open");}
 function setLang(b){lang=b.dataset.lang;document.getElementById("langLabel").textContent=langLabels[lang];document.querySelectorAll(".lang-menu button").forEach(function(x){x.classList.remove("active");});b.classList.add("active");closeLang();}
@@ -185,10 +250,7 @@ function updateUI(){
   document.getElementById("statusLabel").style.color=C[status];
   document.getElementById("timer").style.color=status==="recording"?"var(--text)":"var(--text-dim)";
   document.getElementById("timer").textContent=fmt(elapsed);
-  document.querySelectorAll(".wave-bar").forEach(function(b){
-    if(status==="recording"){b.classList.add("active");b.style.animation="waveform "+b.style.animationDuration+" ease-in-out infinite";}
-    else{b.classList.remove("active");b.style.animation="none";b.style.height="3px";}
-  });
+  document.querySelectorAll(".wave-bar").forEach(function(b){if(status==="recording"){b.classList.add("active");b.style.animation="waveform "+b.style.animationDuration+" ease-in-out infinite";}else{b.classList.remove("active");b.style.animation="none";b.style.height="3px";}});
   document.getElementById("idleControls").style.display=status==="idle"?"block":"none";
   document.getElementById("recordingControls").style.display=status==="recording"?"grid":"none";
   document.getElementById("pausedControls").style.display=status==="paused"?"grid":"none";
@@ -201,30 +263,25 @@ function updateUI(){
 }
 
 function addLine(time,text,isI,spk){
-  var body=document.getElementById("transcriptBody");
-  var oi=body.querySelector(".interim");if(oi)oi.remove();
+  var body=document.getElementById("transcriptBody"),oi=body.querySelector(".interim");if(oi)oi.remove();
   var sc=SC[spk]||SC[0];
-  if(!isI&&spk!==lastSpeaker&&lastSpeaker>=0&&transcripts.length>0){
-    var dv=document.createElement("div");dv.className="speaker-divider";dv.textContent="화자 변경";body.appendChild(dv);
-  }
-  if(!isI)lastSpeaker=spk;
-  var div=document.createElement("div");
-  div.className=isI?"transcript-line interim":"transcript-line";
+  if(!isI&&spk!==lastSp&&lastSp>=0&&transcripts.length>0){var dv=document.createElement("div");dv.className="speaker-divider";dv.textContent="화자 변경";body.appendChild(dv);}
+  if(!isI)lastSp=spk;
+  var div=document.createElement("div");div.className=isI?"transcript-line interim":"transcript-line";
   var tag=isI?"":'<div class="speaker-tag" style="background:'+sc.bg+";color:"+sc.text+";border:1px solid "+sc.border+'">'+sc.name+"</div>";
   div.innerHTML='<span class="transcript-time">'+(isI?"···":time)+'</span><div class="transcript-content">'+tag+'<div class="transcript-text">'+escH(text)+"</div></div>";
   body.appendChild(div);body.scrollTop=body.scrollHeight;
   document.getElementById("transcriptEmpty").style.display="none";
 }
 
-// ★★★ 테스트에서 검증된 방식 그대로 사용 ★★★
+// ★★★ 음성 인식 — 테스트 검증된 구조 + 즉시 재시작 ★★★
 function startRec(){
-  if(!SRApi)return;
+  if(!SRApi||status!=="recording")return;
   if(rec){try{rec.abort();}catch(x){}rec=null;}
 
-  // ★ 테스트 페이지와 동일한 구조
   rec=new SRApi();
   rec.lang=lang;
-  rec.continuous=false;       // ★ 안드로이드+PC 모두 false (테스트에서 검증됨)
+  rec.continuous=false;
   rec.interimResults=true;
   rec.maxAlternatives=1;
 
@@ -238,78 +295,66 @@ function startRec(){
       var t=e.results[i][0].transcript;
       if(e.results[i].isFinal){
         var tr=t.trim();
-        if(isDup(tr)){var bd=document.getElementById("transcriptBody"),o=bd.querySelector(".interim");if(o)o.remove();continue;}
+        if(isDup(tr))continue;
         var ts=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-        // 간단한 화자 추정 (문장 간 시간 간격 기반)
-        if(transcripts.length>0&&Date.now()-lastFinalTime>3000&&speakerProfiles.length<6){
-          if(curSpeaker===lastSpeaker){curSpeaker=(curSpeaker+1)%Math.max(speakerProfiles.length,2);}
-        }
-        if(speakerProfiles.length===0)speakerProfiles.push({n:1});
-        if(curSpeaker>=speakerProfiles.length&&speakerProfiles.length<6)speakerProfiles.push({n:1});
-
+        var spk=detectSpeaker();
         lastFinalText=tr;lastFinalTime=Date.now();
-        transcripts.push({text:tr,time:ts,speaker:curSpeaker});
-        var bd2=document.getElementById("transcriptBody"),o2=bd2.querySelector(".interim");if(o2)o2.remove();
-        addLine(ts,tr,false,curSpeaker);
-        updateUI();
-
-        if(speakerProfiles.length>0){
-          document.getElementById("speakerBadge").classList.remove("hidden");
-          document.getElementById("speakerCountText").textContent=speakerProfiles.length+"명 감지됨";
-        }
-      }else{
-        interim+=t;
-      }
+        transcripts.push({text:tr,time:ts,speaker:spk});
+        var bd=document.getElementById("transcriptBody"),o=bd.querySelector(".interim");if(o)o.remove();
+        addLine(ts,tr,false,spk);updateUI();
+      }else{interim+=t;}
     }
-    if(interim)addLine("",interim,true,curSpeaker);
+    if(interim)addLine("",interim,true,curSp);
   };
 
   rec.onerror=function(e){
     if(e.error==="not-allowed"){
       document.getElementById("errorBanner").textContent="⚠️ 마이크 권한 차단됨. 주소창 왼쪽 아이콘 → 마이크 허용 → 새로고침";
       document.getElementById("errorBanner").classList.add("visible");
-      handleStop();return;
+      handleStop();
     }
-    // no-speech, aborted 는 무시 → onend에서 재시작
   };
 
+  // ★ 핵심: onend에서 즉시 재시작 (0ms 딜레이)
   rec.onend=function(){
     rec=null;
-    // ★ 녹음 중이면 즉시 다음 세션 시작 (테스트에서 검증된 패턴)
     if(status==="recording"){
-      setTimeout(function(){if(status==="recording")startRec();},50);
+      startRec(); // 딜레이 없이 바로 재시작
     }
   };
 
-  rec.start();
+  try{rec.start();}catch(x){
+    rec=null;
+    if(status==="recording")setTimeout(startRec,100);
+  }
 }
 
-// Watchdog: 12초 무응답시 강제 재시작
+// Watchdog: 8초 무응답시 강제 재시작
 function startWD(){
   stopWD();
   wdInterval=setInterval(function(){
     if(status!=="recording")return;
-    if(Date.now()-lastActivity>12000){
+    if(Date.now()-lastActivity>8000){
       lastActivity=Date.now();
-      if(rec){try{rec.abort();}catch(x){}}rec=null;
-      setTimeout(function(){if(status==="recording")startRec();},100);
+      if(rec){try{rec.abort();}catch(x){}}
+      rec=null;
+      startRec();
     }
-  },4000);
+  },3000);
 }
 function stopWD(){if(wdInterval){clearInterval(wdInterval);wdInterval=null;}}
 
-// 탭 복귀시 재시작
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState==="visible"&&status==="recording"){
     lastActivity=Date.now();
     if(rec){try{rec.abort();}catch(x){}}rec=null;
-    setTimeout(function(){if(status==="recording")startRec();},200);
+    setTimeout(function(){if(status==="recording")startRec();},100);
   }
 });
 
 function handleStart(){
   transcripts=[];elapsed=0;lastFinalText="";lastFinalTime=0;
-  speakerProfiles=[];curSpeaker=0;lastSpeaker=-1;
+  speakers=[];curSp=0;lastSp=-1;pitchBuf=[];volBuf=[];
   lastActivity=Date.now();
   document.getElementById("transcriptBody").innerHTML='<div class="transcript-empty" id="transcriptEmpty">음성을 감지하는 중...</div>';
   document.getElementById("summaryCard").classList.remove("visible");
@@ -318,13 +363,15 @@ function handleStart(){
   document.getElementById("errorBanner").classList.remove("visible");
   status="recording";updateUI();
   timerInterval=setInterval(function(){elapsed++;document.getElementById("timer").textContent=fmt(elapsed);},1000);
+  // ★ 음성인식 먼저, 화자분석은 1초 후 (충돌 방지)
   startRec();
   startWD();
+  setTimeout(startVoiceAnalysis,1000);
 }
 
 function handlePause(){if(rec){try{rec.abort();}catch(x){}}rec=null;clearInterval(timerInterval);stopWD();status="paused";updateUI();}
 function handleResume(){status="recording";updateUI();lastActivity=Date.now();timerInterval=setInterval(function(){elapsed++;document.getElementById("timer").textContent=fmt(elapsed);},1000);startRec();startWD();}
-function handleStop(){if(rec){try{rec.abort();}catch(x){}}rec=null;clearInterval(timerInterval);stopWD();var o=document.getElementById("transcriptBody").querySelector(".interim");if(o)o.remove();status="done";updateUI();}
+function handleStop(){if(rec){try{rec.abort();}catch(x){}}rec=null;clearInterval(timerInterval);stopWD();stopVoiceAnalysis();var o=document.getElementById("transcriptBody").querySelector(".interim");if(o)o.remove();status="done";updateUI();}
 
 async function handleSummarize(){
   if(!transcripts.length)return;
@@ -336,7 +383,7 @@ async function handleSummarize(){
   try{
     var r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key="+geminiApiKey,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({contents:[{parts:[{text:"다음은 회의 녹취록입니다. 아래 형식으로 한국어 요약:\n\n## 📋 회의 요약\n- 2~3문장 요약\n\n## 👥 참석자별 주요 발언\n- 각 화자 핵심 발언\n\n## 🔑 핵심 안건\n- 주요 안건\n\n## ✅ 결정 사항\n\n## 📌 할 일 (Action Items)\n\n---\n녹취록:\n"+ft}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})
+      body:JSON.stringify({contents:[{parts:[{text:"다음은 회의 녹취록입니다. 아래 형식으로 한국어 요약:\n\n## 📋 회의 요약\n- 2~3문장 요약\n\n## 👥 참석자별 주요 발언\n\n## 🔑 핵심 안건\n\n## ✅ 결정 사항\n\n## 📌 할 일 (Action Items)\n\n---\n녹취록:\n"+ft}]}],generationConfig:{temperature:0.3,maxOutputTokens:2048}})
     });
     var d=await r.json();
     if(d.error)renderSum("⚠️ "+d.error.message);
@@ -344,13 +391,9 @@ async function handleSummarize(){
   }catch(e){renderSum("⚠️ "+e.message);}
   btn.textContent="✨ AI 요약";btn.style.opacity="1";btn.disabled=false;
 }
-
 function renderSum(t){var b=document.getElementById("summaryBody"),h="";t.split("\n").forEach(function(l){if(l.indexOf("## ")===0)h+="<h3>"+escH(l.replace("## ",""))+"</h3>";else if(l.indexOf("- ")===0)h+='<div class="item"><span class="bullet">•</span><span class="item-text">'+escH(l.replace("- ",""))+"</span></div>";else if(l.indexOf("---")===0)h+="<hr>";else if(!l.trim())h+='<div style="height:6px"></div>';else h+="<p>"+escH(l)+"</p>";});b.innerHTML=h;}
-
 function handleCopy(){if(!transcripts.length)return;var c=transcripts.map(function(t){return"["+t.time+"] "+(SC[t.speaker]?SC[t.speaker].name:"화자")+": "+t.text;}).join("\n");navigator.clipboard.writeText(c).then(function(){toast("📋 녹취록 복사됨");}).catch(function(){toast("복사 실패");});}
-
 function handleExport(){var c="회의 녹취록\n녹음: "+fmt(elapsed)+"\n"+"=".repeat(40)+"\n\n";transcripts.forEach(function(t){c+="["+t.time+"] "+(SC[t.speaker]?SC[t.speaker].name:"화자")+": "+t.text+"\n";});var s=document.getElementById("summaryBody").textContent;if(s.trim())c+="\n"+"=".repeat(40)+"\n요약\n"+"=".repeat(40)+"\n"+s;var bl=new Blob([c],{type:"text/plain;charset=utf-8"}),u=URL.createObjectURL(bl),a=document.createElement("a");a.href=u;a.download="회의록_"+new Date().toLocaleDateString("ko-KR")+".txt";a.click();URL.revokeObjectURL(u);}
-
 updateUI();
 </script>
 </body>
