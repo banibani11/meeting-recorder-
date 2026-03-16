@@ -146,6 +146,15 @@
   }
   @media (max-width: 639px) { .timer { font-size: 26px; } }
 
+  /* Speaker count badge */
+  .speaker-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: var(--primary-glow); border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 20px; padding: 4px 12px; font-size: 12px; color: var(--accent);
+    margin-top: 10px;
+  }
+  .speaker-badge.hidden { display: none; }
+
   .waveform { display: flex; align-items: center; gap: 3px; height: 36px; justify-content: center; }
   @media (max-width: 639px) { .waveform { gap: 2px; height: 28px; } }
   .wave-bar {
@@ -223,8 +232,8 @@
   }
   @media (max-width: 639px) { .transcript-empty { font-size: 13px; } }
 
-  .transcript-line { display: flex; gap: 12px; margin-bottom: 12px; animation: fadeIn 0.3s ease; }
-  @media (max-width: 639px) { .transcript-line { gap: 8px; margin-bottom: 10px; } }
+  .transcript-line { display: flex; gap: 12px; margin-bottom: 14px; animation: fadeIn 0.3s ease; }
+  @media (max-width: 639px) { .transcript-line { gap: 8px; margin-bottom: 12px; } }
 
   .transcript-time {
     font-family: 'JetBrains Mono', monospace; font-size: 11px;
@@ -233,11 +242,28 @@
   }
   @media (max-width: 639px) { .transcript-time { font-size: 10px; min-width: 58px; } }
 
+  .transcript-content { flex: 1; min-width: 0; }
+
+  .speaker-tag {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 10px; margin-bottom: 3px;
+    letter-spacing: 0.03em;
+  }
+
   .transcript-text { font-size: 14px; line-height: 1.7; color: var(--text); word-break: break-word; }
   @media (max-width: 639px) { .transcript-text { font-size: 13px; } }
 
   .interim { opacity: 0.5; }
   .interim .transcript-text { color: var(--text-dim); font-style: italic; }
+
+  /* Speaker divider */
+  .speaker-divider {
+    display: flex; align-items: center; gap: 10px; margin: 8px 0;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .speaker-divider::before, .speaker-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
 
   .summary-card {
     background: var(--surface); border: 1px solid var(--border-active);
@@ -294,7 +320,6 @@
   }
   @media (max-width: 639px) { .footer { margin-top: 16px; padding-bottom: 24px; } }
 
-  /* Info badge */
   .info-badge {
     display: inline-block; background: var(--primary-glow); color: var(--accent);
     font-size: 11px; padding: 4px 10px; border-radius: 20px; margin-top: 12px;
@@ -308,7 +333,7 @@
   <div class="header">
     <div>
       <h1 class="title">Meeting Recorder</h1>
-      <p class="subtitle">실시간 녹음 · 자동 전사 · AI 요약</p>
+      <p class="subtitle">실시간 녹음 · 화자 구분 · AI 요약</p>
     </div>
     <div class="lang-wrap">
       <button class="lang-btn" id="langBtn" onclick="toggleLang()">
@@ -342,6 +367,11 @@
     </div>
 
     <div class="waveform" id="waveform"></div>
+
+    <div id="speakerBadge" class="speaker-badge hidden">
+      <span>👥</span>
+      <span id="speakerCountText">화자 감지 중...</span>
+    </div>
 
     <div id="idleControls">
       <div class="rec-btn-wrap">
@@ -385,12 +415,11 @@
 
   <p class="footer">
     Chrome 브라우저 권장 · 마이크 권한 필요<br>Web Speech API 기반
-    <br><span class="info-badge">💡 AI 요약은 문장 1개부터 가능</span>
+    <br><span class="info-badge">👥 화자 자동 구분 · 💡 AI 요약은 문장 1개부터 가능</span>
   </p>
 </div>
 
 <script>
-  // ── State ──
   let status = "idle";
   let lang = "ko-KR";
   let transcripts = [];
@@ -398,11 +427,35 @@
   let recognition = null;
   let timerInterval = null;
 
-  // ── Duplicate filter state ──
+  // Duplicate filter
   let lastFinalText = "";
   let lastFinalTime = 0;
-  const DUPLICATE_WINDOW_MS = 3000; // 3초 이내 같은 텍스트는 중복으로 판단
-  const SIMILARITY_THRESHOLD = 0.8; // 80% 이상 유사하면 중복
+
+  // ★ Speaker detection via AudioContext (pitch + volume analysis)
+  let audioContext = null;
+  let analyser = null;
+  let micStream = null;
+  let currentPitch = 0;
+  let currentVolume = 0;
+  let pitchHistory = [];  // rolling average
+  let volumeHistory = [];
+
+  // Speaker tracking
+  const SPEAKER_COLORS = [
+    { bg: "rgba(99,102,241,0.15)", border: "rgba(99,102,241,0.4)", text: "#a5b4fc", name: "화자 A" },
+    { bg: "rgba(34,197,94,0.15)", border: "rgba(34,197,94,0.4)", text: "#86efac", name: "화자 B" },
+    { bg: "rgba(251,146,60,0.15)", border: "rgba(251,146,60,0.4)", text: "#fdba74", name: "화자 C" },
+    { bg: "rgba(236,72,153,0.15)", border: "rgba(236,72,153,0.4)", text: "#f9a8d4", name: "화자 D" },
+    { bg: "rgba(56,189,248,0.15)", border: "rgba(56,189,248,0.4)", text: "#7dd3fc", name: "화자 E" },
+    { bg: "rgba(163,130,255,0.15)", border: "rgba(163,130,255,0.4)", text: "#c4b5fd", name: "화자 F" },
+  ];
+
+  let speakerProfiles = []; // { avgPitch, avgVolume, count }
+  let currentSpeaker = 0;
+  let lastSpeaker = -1;
+  let silenceStart = 0;
+  const SILENCE_THRESHOLD = 800; // ms of silence = possible speaker change
+  const PITCH_DIFF_THRESHOLD = 35; // Hz difference to consider different speaker
 
   const langLabels = {
     "ko-KR": "🇰🇷 한국어",
@@ -416,7 +469,6 @@
     document.getElementById("errorBanner").classList.add("visible");
   }
 
-  // ── Init waveform ──
   const waveformEl = document.getElementById("waveform");
   const isMobile = window.innerWidth < 640;
   const barCount = isMobile ? 20 : 28;
@@ -429,44 +481,168 @@
     waveformEl.appendChild(bar);
   }
 
-  // ── Duplicate detection ──
-  function similarity(a, b) {
-    a = a.trim().toLowerCase();
-    b = b.trim().toLowerCase();
-    if (a === b) return 1;
-    if (a.length === 0 || b.length === 0) return 0;
-    // Check if one contains the other
-    if (a.includes(b) || b.includes(a)) return 0.9;
-    // Simple character-level similarity
-    const longer = a.length >= b.length ? a : b;
-    const shorter = a.length < b.length ? a : b;
-    let matches = 0;
-    for (let i = 0; i < shorter.length; i++) {
-      if (longer[i] === shorter[i]) matches++;
+  // ★ Audio analysis for speaker detection
+  async function startAudioAnalysis() {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(micStream);
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.8;
+      source.connect(analyser);
+      requestAnimationFrame(analyzeAudio);
+    } catch(e) {
+      console.log("Audio analysis unavailable:", e);
     }
-    return matches / longer.length;
   }
 
+  function analyzeAudio() {
+    if (status !== "recording" || !analyser) return;
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteFrequencyData(dataArray);
+
+    // Volume (RMS of frequency data)
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i] * dataArray[i];
+    }
+    currentVolume = Math.sqrt(sum / bufferLength);
+
+    // Pitch estimation (find dominant frequency)
+    let maxVal = 0;
+    let maxIndex = 0;
+    // Focus on voice range (80Hz ~ 500Hz)
+    const minBin = Math.floor(80 * analyser.fftSize / audioContext.sampleRate);
+    const maxBin = Math.floor(500 * analyser.fftSize / audioContext.sampleRate);
+    for (let i = minBin; i < maxBin && i < bufferLength; i++) {
+      if (dataArray[i] > maxVal) {
+        maxVal = dataArray[i];
+        maxIndex = i;
+      }
+    }
+    currentPitch = maxIndex * audioContext.sampleRate / analyser.fftSize;
+
+    // Track silence for speaker change detection
+    if (currentVolume < 8) {
+      if (silenceStart === 0) silenceStart = Date.now();
+    } else {
+      silenceStart = 0;
+      // Rolling averages
+      pitchHistory.push(currentPitch);
+      volumeHistory.push(currentVolume);
+      if (pitchHistory.length > 15) pitchHistory.shift();
+      if (volumeHistory.length > 15) volumeHistory.shift();
+    }
+
+    requestAnimationFrame(analyzeAudio);
+  }
+
+  function getAvgPitch() {
+    if (pitchHistory.length === 0) return 0;
+    return pitchHistory.reduce((a, b) => a + b, 0) / pitchHistory.length;
+  }
+
+  function getAvgVolume() {
+    if (volumeHistory.length === 0) return 0;
+    return volumeHistory.reduce((a, b) => a + b, 0) / volumeHistory.length;
+  }
+
+  function detectSpeaker() {
+    const avgPitch = getAvgPitch();
+    const avgVol = getAvgVolume();
+    if (avgPitch === 0) return currentSpeaker;
+
+    const hadSilence = silenceStart > 0 && (Date.now() - silenceStart) > SILENCE_THRESHOLD;
+
+    // Try to match existing speaker profile
+    let bestMatch = -1;
+    let bestDist = Infinity;
+
+    for (let i = 0; i < speakerProfiles.length; i++) {
+      const sp = speakerProfiles[i];
+      const pitchDiff = Math.abs(avgPitch - sp.avgPitch);
+      const volDiff = Math.abs(avgVol - sp.avgVolume) * 0.3; // volume weighted less
+      const dist = pitchDiff + volDiff;
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestMatch = i;
+      }
+    }
+
+    // If close match exists and no long silence, keep same speaker
+    if (bestMatch >= 0 && bestDist < PITCH_DIFF_THRESHOLD && !hadSilence) {
+      // Update profile with running average
+      const sp = speakerProfiles[bestMatch];
+      sp.avgPitch = (sp.avgPitch * sp.count + avgPitch) / (sp.count + 1);
+      sp.avgVolume = (sp.avgVolume * sp.count + avgVol) / (sp.count + 1);
+      sp.count++;
+      currentSpeaker = bestMatch;
+    }
+    // If silence detected + pitch significantly different → likely new or different speaker
+    else if (hadSilence || bestDist >= PITCH_DIFF_THRESHOLD) {
+      // Check if matches any known speaker (more lenient after silence)
+      let found = false;
+      for (let i = 0; i < speakerProfiles.length; i++) {
+        const pitchDiff = Math.abs(avgPitch - speakerProfiles[i].avgPitch);
+        if (pitchDiff < PITCH_DIFF_THRESHOLD * 1.2) {
+          currentSpeaker = i;
+          const sp = speakerProfiles[i];
+          sp.avgPitch = (sp.avgPitch * sp.count + avgPitch) / (sp.count + 1);
+          sp.avgVolume = (sp.avgVolume * sp.count + avgVol) / (sp.count + 1);
+          sp.count++;
+          found = true;
+          break;
+        }
+      }
+      if (!found && speakerProfiles.length < SPEAKER_COLORS.length) {
+        // New speaker
+        speakerProfiles.push({ avgPitch: avgPitch, avgVolume: avgVol, count: 1 });
+        currentSpeaker = speakerProfiles.length - 1;
+      }
+    }
+
+    // Reset for next segment
+    pitchHistory = [];
+    volumeHistory = [];
+    silenceStart = 0;
+
+    updateSpeakerBadge();
+    return currentSpeaker;
+  }
+
+  function updateSpeakerBadge() {
+    const badge = document.getElementById("speakerBadge");
+    const text = document.getElementById("speakerCountText");
+    if (speakerProfiles.length > 0) {
+      badge.classList.remove("hidden");
+      text.textContent = `${speakerProfiles.length}명 감지됨`;
+    }
+  }
+
+  function stopAudioAnalysis() {
+    if (micStream) {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+    }
+    if (audioContext && audioContext.state !== "closed") {
+      audioContext.close().catch(() => {});
+      audioContext = null;
+    }
+    analyser = null;
+  }
+
+  // ── Duplicate filter ──
   function isDuplicate(text) {
     const now = Date.now();
-    const trimmed = text.trim();
+    const trimmed = text.trim().toLowerCase();
     if (trimmed.length === 0) return true;
-
-    // Check against last final text within time window
-    if (now - lastFinalTime < DUPLICATE_WINDOW_MS) {
-      if (similarity(trimmed, lastFinalText) >= SIMILARITY_THRESHOLD) {
-        return true;
-      }
+    if (trimmed === lastFinalText.trim().toLowerCase() && (now - lastFinalTime) < 2000) {
+      return true;
     }
-
-    // Check against last 3 transcripts
-    const recent = transcripts.slice(-3);
-    for (const t of recent) {
-      if (similarity(trimmed, t.text) >= SIMILARITY_THRESHOLD) {
-        return true;
-      }
-    }
-
     return false;
   }
 
@@ -532,6 +708,9 @@
     document.getElementById("pausedControls").style.display = status === "paused" ? "grid" : "none";
     document.getElementById("doneControls").style.display = status === "done" ? "grid" : "none";
 
+    const badge = document.getElementById("speakerBadge");
+    if (status === "idle") badge.classList.add("hidden");
+
     document.getElementById("transcriptCount").textContent = `${transcripts.length}개 문장`;
 
     const empty = document.getElementById("transcriptEmpty");
@@ -543,16 +722,34 @@
     }
   }
 
-  function addTranscriptLine(time, text, isInterim) {
+  function addTranscriptLine(time, text, isInterim, speakerIdx) {
     const body = document.getElementById("transcriptBody");
     const oldInterim = body.querySelector(".interim");
     if (oldInterim) oldInterim.remove();
 
+    const sc = SPEAKER_COLORS[speakerIdx] || SPEAKER_COLORS[0];
+
+    // Add speaker divider if speaker changed
+    if (!isInterim && speakerIdx !== lastSpeaker && lastSpeaker >= 0 && transcripts.length > 0) {
+      const divider = document.createElement("div");
+      divider.className = "speaker-divider";
+      divider.textContent = "화자 변경";
+      body.appendChild(divider);
+    }
+    if (!isInterim) lastSpeaker = speakerIdx;
+
     const div = document.createElement("div");
     div.className = isInterim ? "transcript-line interim" : "transcript-line";
+
+    const speakerTag = isInterim ? "" :
+      `<div class="speaker-tag" style="background:${sc.bg};color:${sc.text};border:1px solid ${sc.border}">${sc.name}</div>`;
+
     div.innerHTML = `
       <span class="transcript-time">${isInterim ? "···" : time}</span>
-      <span class="transcript-text">${escapeHtml(text)}</span>
+      <div class="transcript-content">
+        ${speakerTag}
+        <div class="transcript-text">${escapeHtml(text)}</div>
+      </div>
     `;
     body.appendChild(div);
     body.scrollTop = body.scrollHeight;
@@ -565,7 +762,6 @@
     return d.innerHTML;
   }
 
-  // ── Speech Recognition ──
   function startRecognition() {
     if (!SpeechRecognition) return;
     recognition = new SpeechRecognition();
@@ -581,9 +777,7 @@
         if (e.results[i].isFinal) {
           const trimmed = t.trim();
 
-          // ★ Skip if duplicate
           if (isDuplicate(trimmed)) {
-            // Remove interim display
             const body = document.getElementById("transcriptBody");
             const oldInterim = body.querySelector(".interim");
             if (oldInterim) oldInterim.remove();
@@ -594,35 +788,40 @@
             hour: "2-digit", minute: "2-digit", second: "2-digit",
           });
 
-          // Update duplicate tracking
+          // ★ Detect which speaker
+          const speaker = detectSpeaker();
+
           lastFinalText = trimmed;
           lastFinalTime = Date.now();
 
-          transcripts.push({ text: trimmed, time: ts });
+          transcripts.push({ text: trimmed, time: ts, speaker: speaker });
 
           const body = document.getElementById("transcriptBody");
           const oldInterim = body.querySelector(".interim");
           if (oldInterim) oldInterim.remove();
-          addTranscriptLine(ts, trimmed, false);
+          addTranscriptLine(ts, trimmed, false, speaker);
           updateUI();
         } else {
           interim += t;
         }
       }
-      if (interim) addTranscriptLine("", interim, true);
+      if (interim) addTranscriptLine("", interim, true, currentSpeaker);
     };
 
     recognition.onerror = (e) => {
       if (e.error === "no-speech" || e.error === "aborted") return;
+      if (status === "recording") {
+        setTimeout(() => { try { startRecognition(); } catch(_) {} }, 300);
+      }
     };
 
     recognition.onend = () => {
       if (status === "recording") {
-        try { recognition.start(); } catch (_) {}
+        setTimeout(() => { try { startRecognition(); } catch(_) {} }, 100);
       }
     };
 
-    recognition.start();
+    try { recognition.start(); } catch(e) {}
   }
 
   function handleStart() {
@@ -630,10 +829,18 @@
     elapsed = 0;
     lastFinalText = "";
     lastFinalTime = 0;
+    speakerProfiles = [];
+    currentSpeaker = 0;
+    lastSpeaker = -1;
+    pitchHistory = [];
+    volumeHistory = [];
+    silenceStart = 0;
+
     document.getElementById("transcriptBody").innerHTML =
       '<div class="transcript-empty" id="transcriptEmpty">음성을 감지하는 중...</div>';
     document.getElementById("summaryCard").classList.remove("visible");
     document.getElementById("summaryBody").innerHTML = "";
+    document.getElementById("speakerBadge").classList.add("hidden");
 
     status = "recording";
     updateUI();
@@ -641,11 +848,14 @@
       elapsed++;
       document.getElementById("timer").textContent = formatTime(elapsed);
     }, 1000);
-    setTimeout(() => startRecognition(), 50);
+
+    // Start both speech recognition and audio analysis
+    startAudioAnalysis();
+    setTimeout(() => startRecognition(), 100);
   }
 
   function handlePause() {
-    if (recognition) { recognition.abort(); recognition = null; }
+    if (recognition) { try { recognition.abort(); } catch(_){} recognition = null; }
     clearInterval(timerInterval);
     status = "paused";
     updateUI();
@@ -658,12 +868,14 @@
       elapsed++;
       document.getElementById("timer").textContent = formatTime(elapsed);
     }, 1000);
-    setTimeout(() => startRecognition(), 50);
+    if (!analyser) startAudioAnalysis();
+    setTimeout(() => startRecognition(), 100);
   }
 
   function handleStop() {
-    if (recognition) { recognition.abort(); recognition = null; }
+    if (recognition) { try { recognition.abort(); } catch(_){} recognition = null; }
     clearInterval(timerInterval);
+    stopAudioAnalysis();
     const oldInterim = document.getElementById("transcriptBody").querySelector(".interim");
     if (oldInterim) oldInterim.remove();
     status = "done";
@@ -687,7 +899,13 @@
       <div class="skeleton" style="width:60%;animation-delay:0.45s"></div>
     `;
 
-    const fullText = transcripts.map(t => `[${t.time}] ${t.text}`).join("\n");
+    // ★ Include speaker info in transcript for better summary
+    const fullText = transcripts.map(t => {
+      const name = SPEAKER_COLORS[t.speaker]?.name || "화자";
+      return `[${t.time}] ${name}: ${t.text}`;
+    }).join("\n");
+
+    const speakerCount = speakerProfiles.length || 1;
 
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -698,7 +916,7 @@
           max_tokens: 1000,
           messages: [{
             role: "user",
-            content: `다음은 회의 녹취록입니다. 이 내용을 분석하여 아래 형식으로 한국어 요약을 작성해주세요:\n\n## 📋 회의 요약\n- 전체적인 회의 내용을 2~3문장으로 요약\n\n## 🔑 핵심 안건\n- 논의된 주요 안건들을 항목별로 정리\n\n## ✅ 결정 사항\n- 회의에서 결정된 내용들\n\n## 📌 할 일 (Action Items)\n- 후속 조치가 필요한 항목들\n\n---\n녹취록:\n${fullText}`,
+            content: `다음은 ${speakerCount}명이 참여한 회의 녹취록입니다. 화자별 발언을 고려하여 아래 형식으로 한국어 요약을 작성해주세요:\n\n## 📋 회의 요약\n- 전체적인 회의 내용을 2~3문장으로 요약\n\n## 👥 참석자별 주요 발언\n- 각 화자의 핵심 발언 정리\n\n## 🔑 핵심 안건\n- 논의된 주요 안건들을 항목별로 정리\n\n## ✅ 결정 사항\n- 회의에서 결정된 내용들\n\n## 📌 할 일 (Action Items)\n- 후속 조치가 필요한 항목들 (가능하면 담당자 표시)\n\n---\n녹취록:\n${fullText}`,
           }],
         }),
       });
@@ -734,8 +952,11 @@
   }
 
   function handleExport() {
-    let content = `회의 녹취록\n녹음 시간: ${formatTime(elapsed)}\n${"=".repeat(40)}\n\n`;
-    transcripts.forEach(t => { content += `[${t.time}] ${t.text}\n`; });
+    let content = `회의 녹취록\n녹음 시간: ${formatTime(elapsed)}\n참석자: ${speakerProfiles.length || 1}명\n${"=".repeat(40)}\n\n`;
+    transcripts.forEach(t => {
+      const name = SPEAKER_COLORS[t.speaker]?.name || "화자";
+      content += `[${t.time}] ${name}: ${t.text}\n`;
+    });
     const summaryText = document.getElementById("summaryBody").textContent;
     if (summaryText.trim()) {
       content += `\n${"=".repeat(40)}\n요약\n${"=".repeat(40)}\n${summaryText}`;
