@@ -38,10 +38,7 @@
     padding: 24px 16px;
     overflow-x: hidden;
   }
-
-  @media (max-width: 639px) {
-    body { padding: 16px 12px; }
-  }
+  @media (max-width: 639px) { body { padding: 16px 12px; } }
 
   @keyframes pulse {
     0%, 100% { transform: scale(1); opacity: 1; }
@@ -66,7 +63,6 @@
 
   .container { max-width: 720px; margin: 0 auto; width: 100%; }
 
-  /* Header */
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; gap: 12px; }
   @media (max-width: 639px) { .header { margin-bottom: 20px; } }
 
@@ -81,7 +77,6 @@
   .subtitle { font-size: 14px; color: var(--text-muted); margin: 2px 0 0; }
   @media (max-width: 639px) { .subtitle { font-size: 12px; } }
 
-  /* Language */
   .lang-wrap { position: relative; flex-shrink: 0; }
   .lang-btn {
     background: var(--surface); color: var(--text); border: 1px solid var(--border);
@@ -114,7 +109,6 @@
   .backdrop { position: fixed; inset: 0; z-index: 50; display: none; }
   .backdrop.open { display: block; }
 
-  /* Cards */
   .card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 20px; padding: 28px; margin-bottom: 20px; transition: all 0.4s;
@@ -124,14 +118,11 @@
     .card { border-radius: 16px; padding: 20px 16px; margin-bottom: 14px; }
   }
 
-  /* Status row */
   .status-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
   @media (max-width: 639px) { .status-row { margin-bottom: 14px; } }
 
   .status-indicator { display: flex; align-items: center; gap: 10px; }
-  .rec-dot {
-    position: relative; width: 10px; height: 10px; display: none;
-  }
+  .rec-dot { position: relative; width: 10px; height: 10px; display: none; }
   .rec-dot.active { display: block; }
   .rec-dot-inner {
     width: 10px; height: 10px; border-radius: 50%; background: var(--red);
@@ -155,18 +146,14 @@
   }
   @media (max-width: 639px) { .timer { font-size: 26px; } }
 
-  /* Waveform */
   .waveform { display: flex; align-items: center; gap: 3px; height: 36px; justify-content: center; }
   @media (max-width: 639px) { .waveform { gap: 2px; height: 28px; } }
   .wave-bar {
     width: 3px; border-radius: 2px; background: var(--border); height: 3px; transition: height 0.3s;
   }
-  .wave-bar.active {
-    background: linear-gradient(180deg, var(--primary), var(--accent));
-  }
+  .wave-bar.active { background: linear-gradient(180deg, var(--primary), var(--accent)); }
   @media (max-width: 639px) { .wave-bar { width: 2.5px; } }
 
-  /* Record button */
   .rec-btn-wrap { display: flex; justify-content: center; margin: 12px 0 8px; }
   @media (max-width: 639px) { .rec-btn-wrap { margin: 8px 0 4px; } }
   .rec-btn {
@@ -183,7 +170,6 @@
   .rec-hint { text-align: center; font-size: 13px; color: var(--text-muted); margin-top: 8px; }
   @media (max-width: 639px) { .rec-hint { font-size: 12px; } }
 
-  /* Control buttons */
   .controls { display: grid; gap: 12px; margin-top: 24px; }
   .controls.two { grid-template-columns: 1fr 1fr; }
   .controls.three { grid-template-columns: 1fr 1fr auto; }
@@ -208,7 +194,6 @@
   .btn-summary { background: linear-gradient(135deg, var(--primary), #4338ca); color: #fff; }
   .btn-export { background: var(--green-glow); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
 
-  /* Transcript */
   .transcript-header {
     padding: 16px 24px; border-bottom: 1px solid var(--border);
     display: flex; justify-content: space-between; align-items: center;
@@ -218,10 +203,7 @@
   .transcript-title { font-size: 15px; font-weight: 600; }
   @media (max-width: 639px) { .transcript-title { font-size: 14px; } }
 
-  .transcript-count {
-    font-size: 11px; color: var(--text-muted);
-    font-family: 'JetBrains Mono', monospace;
-  }
+  .transcript-count { font-size: 11px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 
   .transcript-body {
     height: 340px; min-height: 280px; overflow-y: auto;
@@ -257,7 +239,6 @@
   .interim { opacity: 0.5; }
   .interim .transcript-text { color: var(--text-dim); font-style: italic; }
 
-  /* Summary */
   .summary-card {
     background: var(--surface); border: 1px solid var(--border-active);
     border-radius: 20px; overflow: hidden; animation: fadeIn 0.4s ease;
@@ -297,7 +278,6 @@
     background-size: 200% 100%; animation: shimmer 1.5s infinite; margin-bottom: 10px;
   }
 
-  /* Error */
   .error-banner {
     background: var(--red-glow); border: 1px solid var(--red);
     border-radius: 20px; padding: 16px; margin-bottom: 24px;
@@ -313,12 +293,18 @@
     margin-top: 24px; padding-bottom: 8px; line-height: 1.5;
   }
   @media (max-width: 639px) { .footer { margin-top: 16px; padding-bottom: 24px; } }
+
+  /* Info badge */
+  .info-badge {
+    display: inline-block; background: var(--primary-glow); color: var(--accent);
+    font-size: 11px; padding: 4px 10px; border-radius: 20px; margin-top: 12px;
+    border: 1px solid rgba(99,102,241,0.2);
+  }
 </style>
 </head>
 <body>
 <div class="container">
 
-  <!-- Header -->
   <div class="header">
     <div>
       <h1 class="title">Meeting Recorder</h1>
@@ -339,12 +325,10 @@
   </div>
   <div class="backdrop" id="backdrop" onclick="closeLang()"></div>
 
-  <!-- Error -->
   <div class="error-banner" id="errorBanner">
     ⚠️ 이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 브라우저를 사용해 주세요.
   </div>
 
-  <!-- Status Card -->
   <div class="card" id="statusCard">
     <div class="status-row">
       <div class="status-indicator">
@@ -359,7 +343,6 @@
 
     <div class="waveform" id="waveform"></div>
 
-    <!-- Idle: big record button -->
     <div id="idleControls">
       <div class="rec-btn-wrap">
         <button class="rec-btn" onclick="handleStart()">🎙️</button>
@@ -367,19 +350,16 @@
       <p class="rec-hint">탭하여 녹음 시작</p>
     </div>
 
-    <!-- Recording controls -->
     <div class="controls two" id="recordingControls" style="display:none">
       <button class="btn btn-pause" onclick="handlePause()">⏸ 일시정지</button>
       <button class="btn btn-stop" onclick="handleStop()">⏹ 종료</button>
     </div>
 
-    <!-- Paused controls -->
     <div class="controls two" id="pausedControls" style="display:none">
       <button class="btn btn-resume" onclick="handleResume()">▶ 다시 시작</button>
       <button class="btn btn-stop" onclick="handleStop()">⏹ 종료</button>
     </div>
 
-    <!-- Done controls -->
     <div class="controls three" id="doneControls" style="display:none">
       <button class="btn btn-new" onclick="handleStart()">🔄 새 녹음</button>
       <button class="btn btn-summary" id="summaryBtn" onclick="handleSummarize()">✨ AI 요약</button>
@@ -387,7 +367,6 @@
     </div>
   </div>
 
-  <!-- Transcript -->
   <div class="card" style="padding:0; overflow:hidden;">
     <div class="transcript-header">
       <span class="transcript-title">📝 실시간 녹취록</span>
@@ -399,23 +378,31 @@
     </div>
   </div>
 
-  <!-- Summary -->
   <div class="summary-card" id="summaryCard">
     <div class="summary-header">✨ AI 회의 요약</div>
     <div class="summary-body" id="summaryBody"></div>
   </div>
 
-  <p class="footer">Chrome 브라우저 권장 · 마이크 권한 필요<br>Web Speech API 기반</p>
+  <p class="footer">
+    Chrome 브라우저 권장 · 마이크 권한 필요<br>Web Speech API 기반
+    <br><span class="info-badge">💡 AI 요약은 문장 1개부터 가능</span>
+  </p>
 </div>
 
 <script>
   // ── State ──
-  let status = "idle"; // idle | recording | paused | done
+  let status = "idle";
   let lang = "ko-KR";
   let transcripts = [];
   let elapsed = 0;
   let recognition = null;
   let timerInterval = null;
+
+  // ── Duplicate filter state ──
+  let lastFinalText = "";
+  let lastFinalTime = 0;
+  const DUPLICATE_WINDOW_MS = 3000; // 3초 이내 같은 텍스트는 중복으로 판단
+  const SIMILARITY_THRESHOLD = 0.8; // 80% 이상 유사하면 중복
 
   const langLabels = {
     "ko-KR": "🇰🇷 한국어",
@@ -424,13 +411,12 @@
     "zh-CN": "🇨🇳 中文",
   };
 
-  // ── Check support ──
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     document.getElementById("errorBanner").classList.add("visible");
   }
 
-  // ── Init waveform bars ──
+  // ── Init waveform ──
   const waveformEl = document.getElementById("waveform");
   const isMobile = window.innerWidth < 640;
   const barCount = isMobile ? 20 : 28;
@@ -441,6 +427,47 @@
     bar.style.setProperty("--h", `${6 + Math.random() * (isMobile ? 20 : 28)}px`);
     bar.style.animationDuration = `${0.35 + Math.random() * 0.65}s`;
     waveformEl.appendChild(bar);
+  }
+
+  // ── Duplicate detection ──
+  function similarity(a, b) {
+    a = a.trim().toLowerCase();
+    b = b.trim().toLowerCase();
+    if (a === b) return 1;
+    if (a.length === 0 || b.length === 0) return 0;
+    // Check if one contains the other
+    if (a.includes(b) || b.includes(a)) return 0.9;
+    // Simple character-level similarity
+    const longer = a.length >= b.length ? a : b;
+    const shorter = a.length < b.length ? a : b;
+    let matches = 0;
+    for (let i = 0; i < shorter.length; i++) {
+      if (longer[i] === shorter[i]) matches++;
+    }
+    return matches / longer.length;
+  }
+
+  function isDuplicate(text) {
+    const now = Date.now();
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return true;
+
+    // Check against last final text within time window
+    if (now - lastFinalTime < DUPLICATE_WINDOW_MS) {
+      if (similarity(trimmed, lastFinalText) >= SIMILARITY_THRESHOLD) {
+        return true;
+      }
+    }
+
+    // Check against last 3 transcripts
+    const recent = transcripts.slice(-3);
+    for (const t of recent) {
+      if (similarity(trimmed, t.text) >= SIMILARITY_THRESHOLD) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   // ── Language ──
@@ -464,7 +491,6 @@
     closeLang();
   }
 
-  // ── Format time ──
   function formatTime(s) {
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
@@ -474,7 +500,6 @@
       : `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
   }
 
-  // ── UI Update ──
   function updateUI() {
     const card = document.getElementById("statusCard");
     const dot = document.getElementById("recDot");
@@ -491,7 +516,6 @@
     timer.style.color = status === "recording" ? "var(--text)" : "var(--text-dim)";
     timer.textContent = formatTime(elapsed);
 
-    // Waveform
     document.querySelectorAll(".wave-bar").forEach(bar => {
       if (status === "recording") {
         bar.classList.add("active");
@@ -503,16 +527,13 @@
       }
     });
 
-    // Controls
     document.getElementById("idleControls").style.display = status === "idle" ? "block" : "none";
     document.getElementById("recordingControls").style.display = status === "recording" ? "grid" : "none";
     document.getElementById("pausedControls").style.display = status === "paused" ? "grid" : "none";
     document.getElementById("doneControls").style.display = status === "done" ? "grid" : "none";
 
-    // Transcript count
     document.getElementById("transcriptCount").textContent = `${transcripts.length}개 문장`;
 
-    // Empty state
     const empty = document.getElementById("transcriptEmpty");
     if (transcripts.length === 0 && !document.querySelector(".interim")) {
       empty.style.display = "flex";
@@ -524,20 +545,17 @@
 
   function addTranscriptLine(time, text, isInterim) {
     const body = document.getElementById("transcriptBody");
-    // Remove existing interim
     const oldInterim = body.querySelector(".interim");
     if (oldInterim) oldInterim.remove();
 
     const div = document.createElement("div");
     div.className = isInterim ? "transcript-line interim" : "transcript-line";
-
     div.innerHTML = `
       <span class="transcript-time">${isInterim ? "···" : time}</span>
       <span class="transcript-text">${escapeHtml(text)}</span>
     `;
     body.appendChild(div);
     body.scrollTop = body.scrollHeight;
-
     document.getElementById("transcriptEmpty").style.display = "none";
   }
 
@@ -561,15 +579,31 @@
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
+          const trimmed = t.trim();
+
+          // ★ Skip if duplicate
+          if (isDuplicate(trimmed)) {
+            // Remove interim display
+            const body = document.getElementById("transcriptBody");
+            const oldInterim = body.querySelector(".interim");
+            if (oldInterim) oldInterim.remove();
+            continue;
+          }
+
           const ts = new Date().toLocaleTimeString("ko-KR", {
             hour: "2-digit", minute: "2-digit", second: "2-digit",
           });
-          transcripts.push({ text: t.trim(), time: ts });
-          // Remove interim, add final
+
+          // Update duplicate tracking
+          lastFinalText = trimmed;
+          lastFinalTime = Date.now();
+
+          transcripts.push({ text: trimmed, time: ts });
+
           const body = document.getElementById("transcriptBody");
           const oldInterim = body.querySelector(".interim");
           if (oldInterim) oldInterim.remove();
-          addTranscriptLine(ts, t.trim(), false);
+          addTranscriptLine(ts, trimmed, false);
           updateUI();
         } else {
           interim += t;
@@ -591,10 +625,11 @@
     recognition.start();
   }
 
-  // ── Handlers ──
   function handleStart() {
     transcripts = [];
     elapsed = 0;
+    lastFinalText = "";
+    lastFinalTime = 0;
     document.getElementById("transcriptBody").innerHTML =
       '<div class="transcript-empty" id="transcriptEmpty">음성을 감지하는 중...</div>';
     document.getElementById("summaryCard").classList.remove("visible");
@@ -629,7 +664,6 @@
   function handleStop() {
     if (recognition) { recognition.abort(); recognition = null; }
     clearInterval(timerInterval);
-    // Remove interim
     const oldInterim = document.getElementById("transcriptBody").querySelector(".interim");
     if (oldInterim) oldInterim.remove();
     status = "done";
@@ -715,7 +749,6 @@
     URL.revokeObjectURL(url);
   }
 
-  // Init
   updateUI();
 </script>
 </body>
